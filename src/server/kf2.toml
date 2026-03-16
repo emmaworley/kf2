@@ -1,0 +1,16 @@
+[database]
+path = "kf2.db"
+
+[server]
+host = "127.0.0.1"
+port = 3000
+
+[projector]
+root = "src/frontend/packages/projector/dist"
+# Uncomment for development (Vite via reverse proxy)
+# root = "http://localhost:5174"
+
+[remocon]
+root = "src/frontend/packages/remocon/dist"
+# Uncomment for development (Vite via reverse proxy)
+# root = "http://localhost:5173"

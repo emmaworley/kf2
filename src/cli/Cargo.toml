@@ -1,0 +1,10 @@
+[package]
+name = "kf2ctl"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tonic = "0.14"
+kf2-proto = { path = "../proto" }

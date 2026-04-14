@@ -129,23 +129,12 @@ impl Provider {
 // Provider registry
 // ---------------------------------------------------------------------------
 
+#[derive(Default)]
 pub struct ProviderRegistry {
     providers: HashMap<ProviderId, Arc<Provider>>,
 }
 
-impl Default for ProviderRegistry {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl ProviderRegistry {
-    pub fn new() -> Self {
-        Self {
-            providers: HashMap::new(),
-        }
-    }
-
     pub fn register(&mut self, provider: Arc<Provider>) {
         let id = provider.metadata().id;
         self.providers.insert(id, provider);

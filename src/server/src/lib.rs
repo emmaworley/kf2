@@ -1,24 +1,64 @@
 pub mod api;
-pub mod config;
+pub mod cli;
 pub mod db;
-pub mod frontend;
+pub mod models;
 pub mod provider;
-pub mod provider_config;
 pub mod repo;
-pub mod session;
 
 use std::sync::Arc;
 
+use crate::provider::cache::ProviderCache;
+use crate::repo::diesel_impl::DieselProviderConfigRepo;
+use crate::repo::{ProviderConfigRepo, SessionRepo};
 use anyhow::{Context, Result};
+use axum::body::Body;
+use axum::http::{Response, StatusCode};
+use axum::response::IntoResponse;
+use axum::Router;
 use kf2_proto::kf2::provider_service_server::ProviderServiceServer;
 use kf2_proto::kf2::session_manager_service_server::SessionManagerServiceServer;
 use kf2_proto::kf2::session_service_server::SessionServiceServer;
+use repo::diesel_impl::DieselSessionRepo;
+use serde::Deserialize;
 use tokio::net::TcpListener;
+use tower_http::services::{ServeDir, ServeFile};
+//
+// App-level config structs
+//
 
-use crate::config::AppConfig;
-use crate::provider::cache::ProviderCache;
-use crate::repo::diesel_impl::{DieselProviderConfigRepo, DieselSessionRepo};
-use crate::repo::{ProviderConfigRepo, SessionRepo};
+#[derive(Debug, Deserialize, Clone)]
+pub struct AppConfig {
+    pub database: DatabaseConfig,
+    pub server: ServerConfig,
+    pub projector: FrontendConfig,
+    pub remocon: FrontendConfig,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct DatabaseConfig {
+    pub path: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct ServerConfig {
+    pub listen_addr: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct FrontendConfig {
+    pub root: String,
+}
+
+impl FrontendConfig {
+    pub fn is_http_endpoint(&self) -> bool {
+        let r = self.root.trim_start();
+        r.starts_with("http://") || r.starts_with("https://")
+    }
+}
+
+//
+// App-level state orchestration
+//
 
 pub struct AppState {
     pub sessions: Arc<dyn SessionRepo>,
@@ -40,7 +80,7 @@ pub async fn build_app(config: AppConfig) -> Result<Arc<AppState>> {
     let provider_configs: Arc<dyn ProviderConfigRepo> =
         Arc::new(DieselProviderConfigRepo::new(pool));
 
-    let mut registry = provider::ProviderRegistry::new();
+    let mut registry = provider::ProviderRegistry::default();
     registry.register(Arc::new(provider::Provider::Dam(
         provider::dam::DamProvider,
     )));
@@ -68,7 +108,14 @@ pub async fn build_app(config: AppConfig) -> Result<Arc<AppState>> {
 }
 
 /// Build the top-level axum router (gRPC-web services + frontend SPAs).
-pub fn build_router(state: Arc<AppState>) -> axum::Router {
+pub fn build_router(state: Arc<AppState>) -> Router {
+    let grpc_router = grpc_routes(state.clone());
+    let frontend_router = frontend_routes(&state.config);
+
+    Router::new().merge(grpc_router).merge(frontend_router)
+}
+
+fn grpc_routes(state: Arc<AppState>) -> Router {
     let session_manager_svc = api::SessionManagerServiceImpl {
         state: state.clone(),
     };
@@ -78,23 +125,72 @@ pub fn build_router(state: Arc<AppState>) -> axum::Router {
     let provider_svc = api::ProviderServiceImpl {
         state: state.clone(),
     };
-    let grpc_router =
-        tonic::service::Routes::new(SessionManagerServiceServer::new(session_manager_svc))
-            .add_service(SessionServiceServer::new(session_svc))
-            .add_service(ProviderServiceServer::new(provider_svc))
-            .into_axum_router()
-            .layer(tonic_web::GrpcWebLayer::new());
+    tonic::service::Routes::new(SessionManagerServiceServer::new(session_manager_svc))
+        .add_service(SessionServiceServer::new(session_svc))
+        .add_service(ProviderServiceServer::new(provider_svc))
+        .into_axum_router()
+        .layer(tonic_web::GrpcWebLayer::new())
+}
 
-    let frontend_router = frontend::frontend_routes(&state.config);
+pub fn frontend_routes(config: &AppConfig) -> Router {
+    Router::new()
+        .nest("/projector", spa_router(&config.projector))
+        .nest("/remocon", spa_router(&config.remocon))
+}
 
-    axum::Router::new()
-        .merge(grpc_router)
-        .merge(frontend_router)
+fn spa_router(frontend: &FrontendConfig) -> Router {
+    if frontend.is_http_endpoint() {
+        dev_proxy_router(&frontend.root)
+    } else {
+        serve_dir_router(&frontend.root)
+    }
+}
+
+fn serve_dir_router(dist_path: &str) -> Router {
+    let index = format!("{}/index.html", dist_path);
+    Router::new().fallback_service(ServeDir::new(dist_path).fallback(ServeFile::new(index)))
+}
+
+fn dev_proxy_router(upstream_url: &str) -> Router {
+    let client = reqwest::Client::new();
+    let base_url = upstream_url.trim_end_matches('/').to_string();
+
+    Router::new().fallback(move |req: axum::extract::Request| {
+        let client = client.clone();
+        let base_url = base_url.clone();
+        async move {
+            let (parts, body) = req.into_parts();
+            // `Uri`'s `Display` prints `/path?query` when scheme/authority are
+            // absent, which is always the case for a request axum has routed.
+            let url = format!("{base_url}{}", parts.uri);
+            let req_body = reqwest::Body::wrap_stream(body.into_data_stream());
+
+            match client
+                .request(parts.method, &url)
+                .headers(parts.headers)
+                .body(req_body)
+                .send()
+                .await
+            {
+                Ok(resp) => {
+                    let mut builder = Response::builder().status(resp.status());
+                    if let Some(headers) = builder.headers_mut() {
+                        *headers = resp.headers().clone();
+                    }
+                    builder
+                        .body(Body::from_stream(resp.bytes_stream()))
+                        .unwrap()
+                        .into_response()
+                }
+                Err(_) => (StatusCode::BAD_GATEWAY, "Dev server unreachable").into_response(),
+            }
+        }
+    })
 }
 
 /// Convenience entry point: build state, build the router, bind, and serve.
 pub async fn run(config: AppConfig) -> Result<()> {
-    let addr = config.server.listen_addr();
+    let addr = config.server.listen_addr.clone();
     let state = build_app(config).await?;
     let app = build_router(state);
     let listener = TcpListener::bind(&addr)
@@ -109,14 +205,14 @@ pub mod test_support {
     //! Helpers for constructing an `AppState` in unit tests without touching
     //! the real filesystem config or spinning up a full `build_app`.
 
-    use std::sync::Arc;
-
-    use crate::config::{AppConfig, DatabaseConfig, FrontendConfig, ServerConfig};
+    use crate::db::test_support::create_pool_in_memory;
     use crate::provider::cache::ProviderCache;
     use crate::provider::{Provider, ProviderRegistry};
-    use crate::repo::diesel_impl::{DieselProviderConfigRepo, DieselSessionRepo};
+    use crate::repo::diesel_impl::DieselProviderConfigRepo;
+    use crate::repo::diesel_impl::DieselSessionRepo;
     use crate::repo::{ProviderConfigRepo, SessionRepo};
-    use crate::{AppState, db};
+    use crate::{AppConfig, AppState, DatabaseConfig, FrontendConfig, ServerConfig};
+    use std::sync::Arc;
 
     fn dummy_config() -> AppConfig {
         AppConfig {
@@ -124,8 +220,7 @@ pub mod test_support {
                 path: ":memory:".into(),
             },
             server: ServerConfig {
-                host: "127.0.0.1".into(),
-                port: 0,
+                listen_addr: "127.0.0.1:0".into(),
             },
             projector: FrontendConfig {
                 root: String::new(),
@@ -139,11 +234,11 @@ pub mod test_support {
     /// Build a fully-migrated `AppState` backed by a named in-memory SQLite
     /// database, with the given providers registered.
     pub async fn test_app_state(db_name: &str, providers: Vec<Arc<Provider>>) -> Arc<AppState> {
-        let pool = db::create_pool_in_memory(db_name).await.unwrap();
+        let pool = create_pool_in_memory(db_name).await.unwrap();
         let sessions: Arc<dyn SessionRepo> = Arc::new(DieselSessionRepo::new(pool.clone()));
         let provider_configs: Arc<dyn ProviderConfigRepo> =
             Arc::new(DieselProviderConfigRepo::new(pool));
-        let mut registry = ProviderRegistry::new();
+        let mut registry = ProviderRegistry::default();
         for p in providers {
             registry.register(p);
         }

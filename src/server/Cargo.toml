@@ -14,7 +14,7 @@ random_word = { version = "0.5", features = ["en"] }
 tonic = "0.14"
 tonic-web = "0.14"
 tower-http = { version = "0.6", features = ["fs", "set-header"] }
-reqwest = { version = "0.12", features = ["cookies"] }
+reqwest = { version = "0.12", features = ["cookies", "stream"] }
 thiserror = "2"
 anyhow = "1"
 kf2-proto = { path = "../proto" }
@@ -32,3 +32,7 @@ test-support = []
 
 [dev-dependencies]
 tempfile = "3.27.0"
+
+[[test]]
+name = "startup"
+required-features = ["test-support"]

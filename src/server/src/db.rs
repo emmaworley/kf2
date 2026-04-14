@@ -1,9 +1,9 @@
 use diesel::connection::SimpleConnection;
 use diesel::r2d2::{self, ConnectionManager, CustomizeConnection, Pool};
 use diesel::sqlite::SqliteConnection;
-use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 
-use crate::config::DatabaseConfig;
+use crate::DatabaseConfig;
 
 pub type DbPool = Pool<ConnectionManager<SqliteConnection>>;
 
@@ -14,7 +14,7 @@ pub enum DbError {
     #[error("pool build error: {0}")]
     PoolBuild(#[from] r2d2::Error),
     #[error("connection checkout error: {0}")]
-    PoolCheckout(#[from] diesel::r2d2::PoolError),
+    PoolCheckout(#[from] r2d2::PoolError),
     #[error("migration error: {0}")]
     Migration(String),
     #[error("blocking task canceled: {0}")]
@@ -30,7 +30,7 @@ struct SqlitePragmaCustomizer;
 impl CustomizeConnection<SqliteConnection, diesel::r2d2::Error> for SqlitePragmaCustomizer {
     fn on_acquire(&self, conn: &mut SqliteConnection) -> Result<(), diesel::r2d2::Error> {
         conn.batch_execute("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")
-            .map_err(diesel::r2d2::Error::QueryError)
+            .map_err(r2d2::Error::QueryError)
     }
 }
 
@@ -54,20 +54,25 @@ pub async fn run_migrations(pool: &DbPool) -> Result<(), DbError> {
     Ok(())
 }
 
-/// SQLite URI for a named in-memory database with shared cache, so every
-/// connection opened against it sees the same database. Callers that use
-/// distinct `name`s stay isolated from each other.
-pub fn in_memory_uri(name: &str) -> String {
-    format!("file:kf2_{name}?mode=memory&cache=shared")
-}
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support {
+    use super::*;
 
-/// Build a fully-migrated pool backed by a named in-memory SQLite database.
-/// Convenience wrapper around `in_memory_uri` + `create_pool` + `run_migrations`.
-pub async fn create_pool_in_memory(name: &str) -> Result<DbPool, DbError> {
-    let cfg = DatabaseConfig {
-        path: in_memory_uri(name),
-    };
-    let pool = create_pool(&cfg)?;
-    run_migrations(&pool).await?;
-    Ok(pool)
+    /// SQLite URI for a named in-memory database with shared cache, so every
+    /// connection opened against it sees the same database. Callers that use
+    /// distinct `name`s stay isolated from each other.
+    pub fn in_memory_uri(name: &str) -> String {
+        format!("file:kf2_{name}?mode=memory&cache=shared")
+    }
+
+    /// Build a fully-migrated pool backed by a named in-memory SQLite database.
+    /// Convenience wrapper around `in_memory_uri` + `create_pool` + `run_migrations`.
+    pub async fn create_pool_in_memory(name: &str) -> Result<DbPool, DbError> {
+        let cfg = DatabaseConfig {
+            path: in_memory_uri(name),
+        };
+        let pool = create_pool(&cfg)?;
+        run_migrations(&pool).await?;
+        Ok(pool)
+    }
 }

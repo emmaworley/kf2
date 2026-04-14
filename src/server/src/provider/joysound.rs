@@ -19,10 +19,10 @@ impl JoysoundProvider {
         &self,
         config: Option<&ProviderConfig>,
     ) -> Result<Arc<dyn ProviderSession>, ProviderError> {
-        let _cfg = config.ok_or_else(|| {
+        config.ok_or_else(|| {
             ProviderError::AuthFailed("Joysound requires username/password".into())
         })?;
-        // TODO: perform real upstream login using `_cfg.username` + `_cfg.password`.
+        // TODO: perform real upstream login using the config's username/password.
         let client = reqwest::Client::builder()
             .cookie_store(true)
             .build()

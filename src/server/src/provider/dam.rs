@@ -19,9 +19,8 @@ impl DamProvider {
         &self,
         config: Option<&ProviderConfig>,
     ) -> Result<Arc<dyn ProviderSession>, ProviderError> {
-        let _cfg = config
-            .ok_or_else(|| ProviderError::AuthFailed("DAM requires username/password".into()))?;
-        // TODO: perform real upstream login using `_cfg.username` + `_cfg.password`.
+        config.ok_or_else(|| ProviderError::AuthFailed("DAM requires username/password".into()))?;
+        // TODO: perform real upstream login using the config's username/password.
         // For now, hand back a session with a placeholder token.
         let client = reqwest::Client::builder()
             .cookie_store(true)

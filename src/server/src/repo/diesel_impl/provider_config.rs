@@ -17,6 +17,14 @@ struct ProviderConfigRow {
     config_json: String,
 }
 
+impl TryFrom<ProviderConfigRow> for ProviderConfig {
+    type Error = RepoError;
+
+    fn try_from(row: ProviderConfigRow) -> Result<Self, Self::Error> {
+        Ok(serde_json::from_str::<ProviderConfig>(&row.config_json)?)
+    }
+}
+
 impl TryFrom<ProviderConfigRow> for (ProviderId, ProviderConfig) {
     type Error = RepoError;
 
@@ -25,7 +33,7 @@ impl TryFrom<ProviderConfigRow> for (ProviderId, ProviderConfig) {
             .provider_id
             .parse::<ProviderId>()
             .map_err(|e| RepoError::ProviderId(e.to_string()))?;
-        let config = serde_json::from_str::<ProviderConfig>(&row.config_json)?;
+        let config = ProviderConfig::try_from(row)?;
         Ok((provider_id, config))
     }
 }
@@ -92,9 +100,7 @@ impl ProviderConfigRepo for DieselProviderConfigRepo {
                 .select(ProviderConfigRow::as_select())
                 .first::<ProviderConfigRow>(&mut conn)
                 .optional()?;
-            row.map(<(ProviderId, ProviderConfig)>::try_from)
-                .transpose()
-                .map(|opt| opt.map(|(_, config)| config))
+            row.map(ProviderConfig::try_from).transpose()
         })
         .await?
     }
@@ -142,8 +148,8 @@ impl ProviderConfigRepo for DieselProviderConfigRepo {
 mod tests {
     use super::*;
     use crate::db;
-    use crate::repo::diesel_impl::session::DieselSessionRepo;
     use crate::repo::SessionRepo;
+    use crate::repo::diesel_impl::session::DieselSessionRepo;
 
     async fn repos(test_name: &str) -> (DieselSessionRepo, DieselProviderConfigRepo) {
         let pool = db::test_support::create_pool_in_memory(test_name)

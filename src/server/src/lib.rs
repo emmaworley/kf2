@@ -8,17 +8,16 @@ pub mod repo;
 use std::sync::Arc;
 
 use crate::provider::cache::ProviderCache;
-use crate::repo::diesel_impl::DieselProviderConfigRepo;
+use crate::repo::diesel_impl::{DieselProviderConfigRepo, DieselSessionRepo};
 use crate::repo::{ProviderConfigRepo, SessionRepo};
 use anyhow::{Context, Result};
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Response, StatusCode};
 use axum::response::IntoResponse;
-use axum::Router;
 use kf2_proto::kf2::provider_service_server::ProviderServiceServer;
 use kf2_proto::kf2::session_manager_service_server::SessionManagerServiceServer;
 use kf2_proto::kf2::session_service_server::SessionServiceServer;
-use repo::diesel_impl::DieselSessionRepo;
 use serde::Deserialize;
 use tokio::net::TcpListener;
 use tower_http::services::{ServeDir, ServeFile};
@@ -179,7 +178,7 @@ fn dev_proxy_router(upstream_url: &str) -> Router {
                     }
                     builder
                         .body(Body::from_stream(resp.bytes_stream()))
-                        .unwrap()
+                        .expect("response builder with no header mutations cannot fail")
                         .into_response()
                 }
                 Err(_) => (StatusCode::BAD_GATEWAY, "Dev server unreachable").into_response(),

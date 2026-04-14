@@ -41,7 +41,7 @@ impl SessionRepo for DieselSessionRepo {
                     .returning(Session::as_returning())
                     .get_result::<Session>(&mut conn)
                 {
-                    Ok(row) => return Ok(row.into()),
+                    Ok(row) => return Ok(row),
                     Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => {
                         continue;
                     }
@@ -63,7 +63,7 @@ impl SessionRepo for DieselSessionRepo {
                 .select(Session::as_select())
                 .first::<Session>(&mut conn)
                 .optional()?;
-            Ok(row.map(Into::into))
+            Ok(row)
         })
         .await?
     }
@@ -75,7 +75,7 @@ impl SessionRepo for DieselSessionRepo {
             let rows = session::table
                 .select(Session::as_select())
                 .load::<Session>(&mut conn)?;
-            Ok(rows.into_iter().map(Into::into).collect())
+            Ok(rows)
         })
         .await?
     }

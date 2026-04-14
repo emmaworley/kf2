@@ -115,7 +115,7 @@ impl SessionService for SessionServiceImpl {
         let provider_id = ProviderId::try_from(inner.provider)?;
         self.ensure_session_exists(&inner.session_id).await?;
 
-        let row = self
+        let config = self
             .state
             .provider_configs
             .get(&inner.session_id, provider_id)
@@ -123,8 +123,8 @@ impl SessionService for SessionServiceImpl {
 
         let status = ProviderStatus {
             provider: inner.provider,
-            is_configured: row.is_some(),
-            username: row.and_then(|r| config_username(&r.config)),
+            is_configured: config.is_some(),
+            username: config.and_then(|c| config_username(&c)),
         };
         Ok(Response::new(GetProviderStatusResponse {
             status: Some(status),
@@ -146,10 +146,10 @@ impl SessionService for SessionServiceImpl {
 
         let providers = rows
             .into_iter()
-            .map(|r| ProviderStatus {
-                provider: r.provider_id.into(),
+            .map(|(provider_id, config)| ProviderStatus {
+                provider: provider_id.into(),
                 is_configured: true,
-                username: config_username(&r.config),
+                username: config_username(&config),
             })
             .collect();
         Ok(Response::new(ListConfiguredProvidersResponse { providers }))
@@ -193,14 +193,14 @@ mod tests {
         let _ = resp.into_inner();
 
         // DB row was written.
-        let row = svc
+        let config = svc
             .state
             .provider_configs
             .get(&session_id, ProviderId::Dam)
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(config_username(&row.config).as_deref(), Some("alice"));
+        assert_eq!(config_username(&config).as_deref(), Some("alice"));
 
         // Cache has an entry.
         assert!(

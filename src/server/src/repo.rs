@@ -1,8 +1,8 @@
 use async_trait::async_trait;
+use std::collections::HashMap;
 
+use crate::models::Session;
 use crate::provider::types::{ProviderConfig, ProviderId};
-use crate::provider_config::ProviderConfigRow;
-use crate::session::Session;
 
 pub mod diesel_impl;
 #[allow(clippy::all, unused_qualifications)]
@@ -51,10 +51,12 @@ pub trait ProviderConfigRepo: Send + Sync {
         &self,
         session_id: &str,
         provider_id: ProviderId,
-    ) -> Result<Option<ProviderConfigRow>, RepoError>;
+    ) -> Result<Option<ProviderConfig>, RepoError>;
 
-    async fn list_for_session(&self, session_id: &str)
-    -> Result<Vec<ProviderConfigRow>, RepoError>;
+    async fn list_for_session(
+        &self,
+        session_id: &str,
+    ) -> Result<HashMap<ProviderId, ProviderConfig>, RepoError>;
 
     async fn delete(&self, session_id: &str, provider_id: ProviderId) -> Result<bool, RepoError>;
 }

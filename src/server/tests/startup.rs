@@ -5,8 +5,8 @@
 //! request to confirm the bound listener is actually serving traffic.
 
 use anyhow::Context;
-use server::config::{AppConfig, DatabaseConfig, FrontendConfig, ServerConfig};
 use server::db;
+use server::{AppConfig, DatabaseConfig, FrontendConfig, ServerConfig};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use tempfile::TempDir;
@@ -18,11 +18,10 @@ fn test_config(tmp: &TempDir, db_name: &str) -> AppConfig {
     let root = tmp.path().to_string_lossy().into_owned();
     AppConfig {
         database: DatabaseConfig {
-            path: db::in_memory_uri(db_name),
+            path: db::test_support::in_memory_uri(db_name),
         },
         server: ServerConfig {
-            host: "127.0.0.1".to_string(),
-            port: 0,
+            listen_addr: "127.0.0.1:0".to_string(),
         },
         projector: FrontendConfig { root: root.clone() },
         remocon: FrontendConfig { root },
@@ -80,6 +79,7 @@ async fn server_starts_and_serves_requests() {
 /// When a frontend's `root` is an `http://` URL, requests nested under that
 /// frontend's prefix should be reverse-proxied to the upstream — including
 /// request bodies and response bodies — so Vite HMR works end-to-end.
+#[cfg(feature = "test-support")]
 #[tokio::test]
 async fn frontend_reverse_proxies_to_dev_server() {
     // Step 1: stand up a mock "Vite dev server" on an ephemeral port. Axum
@@ -108,11 +108,10 @@ async fn frontend_reverse_proxies_to_dev_server() {
     let static_root = tmp.path().to_string_lossy().into_owned();
     let config = AppConfig {
         database: DatabaseConfig {
-            path: db::in_memory_uri("startup_dev_proxy"),
+            path: db::test_support::in_memory_uri("startup_dev_proxy"),
         },
         server: ServerConfig {
-            host: "127.0.0.1".to_string(),
-            port: 0,
+            listen_addr: "127.0.0.1:0".to_string(),
         },
         projector: FrontendConfig {
             root: format!("http://{mock_addr}"),

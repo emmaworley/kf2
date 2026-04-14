@@ -1,51 +1,6 @@
+use crate::AppConfig;
 use clap::Parser;
 use config::{Config, Environment, File};
-use serde::Deserialize;
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct AppConfig {
-    pub database: DatabaseConfig,
-    pub server: ServerConfig,
-    pub projector: FrontendConfig,
-    pub remocon: FrontendConfig,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct DatabaseConfig {
-    pub path: String,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct ServerConfig {
-    pub host: String,
-    pub port: u16,
-}
-
-impl ServerConfig {
-    /// `host:port` string suitable for `TcpListener::bind`.
-    pub fn listen_addr(&self) -> String {
-        format!("{}:{}", self.host, self.port)
-    }
-}
-
-/// Configuration for a frontend SPA.
-///
-/// `root` is either a filesystem path to a built `dist` directory (production
-/// mode — static file serving with index.html fallback) or an `http://` /
-/// `https://` URL pointing at a Vite dev server (development mode — requests
-/// are reverse-proxied for HMR support).
-#[derive(Debug, Deserialize, Clone)]
-pub struct FrontendConfig {
-    pub root: String,
-}
-
-impl FrontendConfig {
-    /// True when `root` is an HTTP(S) URL and should be reverse-proxied.
-    pub fn is_dev_server(&self) -> bool {
-        let r = self.root.trim_start();
-        r.starts_with("http://") || r.starts_with("https://")
-    }
-}
 
 #[derive(Parser, Debug)]
 #[command(name = "kf2", version, about = "KF2 Karaoke Server")]
@@ -75,7 +30,7 @@ pub struct CliArgs {
     pub remocon_root: Option<String>,
 }
 
-pub fn load_config() -> Result<AppConfig, Box<dyn std::error::Error>> {
+pub fn parse_cli_args() -> Result<AppConfig, Box<dyn std::error::Error>> {
     let cli = CliArgs::parse();
 
     let mut builder = Config::builder()

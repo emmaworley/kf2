@@ -7,15 +7,13 @@ use kf2_proto::kf2::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::AppState;
-use crate::session;
-
+use crate::{AppState, models};
 pub struct SessionManagerServiceImpl {
     pub state: Arc<AppState>,
 }
 
-impl From<session::Session> for kf2_proto::kf2::Session {
-    fn from(s: session::Session) -> Self {
+impl From<models::Session> for kf2_proto::kf2::Session {
+    fn from(s: models::Session) -> Self {
         Self {
             id: s.id,
             created_at: s.created_at.and_utc().to_rfc3339(),

@@ -82,15 +82,16 @@ impl ProviderCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::provider::mock::MockProvider;
+    use crate::provider::mock::{MockConfig, MockProvider};
     use crate::provider::types::ProviderConfig;
     use std::sync::atomic::Ordering;
 
     fn sample_config() -> ProviderConfig {
-        ProviderConfig::BasicAuth {
+        MockConfig {
             username: "u".into(),
             password: "p".into(),
         }
+        .into()
     }
 
     #[tokio::test]

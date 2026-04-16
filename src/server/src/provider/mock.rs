@@ -14,6 +14,26 @@ use crate::provider::error::ProviderError;
 use crate::provider::types::*;
 use crate::provider::{LyricsProvider, ProviderSession, ScoringProvider, Searchable};
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MockConfig {
+    pub username: String,
+    pub password: String,
+}
+
+impl TryFrom<&ProviderConfig> for MockConfig {
+    type Error = serde_json::Error;
+
+    fn try_from(value: &ProviderConfig) -> Result<Self, Self::Error> {
+        serde_json::from_value(value.0.clone())
+    }
+}
+
+impl From<MockConfig> for ProviderConfig {
+    fn from(cfg: MockConfig) -> Self {
+        ProviderConfig(serde_json::to_value(cfg).expect("MockConfig is always serializable"))
+    }
+}
+
 #[derive(Default)]
 pub struct MockProviderControl {
     /// If >0, the next N `configure` calls fail with AuthFailed before
@@ -62,8 +82,10 @@ impl MockProvider {
                 .store(remaining - 1, Ordering::SeqCst);
             return Err(ProviderError::AuthFailed("mock: transient fail".into()));
         }
-        let _cfg =
+        let config =
             config.ok_or_else(|| ProviderError::AuthFailed("mock: config required".into()))?;
+        let _cfg = MockConfig::try_from(config)
+            .map_err(|e| ProviderError::AuthFailed(format!("mock: invalid config: {e}")))?;
         self.control
             .configure_success_count
             .fetch_add(1, Ordering::SeqCst);
@@ -133,20 +155,16 @@ impl Searchable for MockProviderSession {
         &self,
         query: &str,
         _page: u32,
-    ) -> Result<SearchResults<Song>, ProviderError> {
+    ) -> Result<SearchResults<SongResult>, ProviderError> {
         self.check_token()?;
         Ok(SearchResults {
-            items: vec![Song {
+            items: vec![SongResult {
                 provider: self.id,
                 id: "1".into(),
                 title: format!("hit for {query}"),
                 artist: "mock artist".into(),
-                duration: None,
-                extra: SongExtra::Dam(DamSongExtra {
-                    vocal_types: vec![],
-                    has_scoring: false,
-                }),
             }],
+            total_count: 1,
             has_more: false,
         })
     }
@@ -159,6 +177,7 @@ impl Searchable for MockProviderSession {
         self.check_token()?;
         Ok(SearchResults {
             items: vec![],
+            total_count: 0,
             has_more: false,
         })
     }
@@ -167,10 +186,11 @@ impl Searchable for MockProviderSession {
         &self,
         _artist_id: &str,
         _page: u32,
-    ) -> Result<SearchResults<Song>, ProviderError> {
+    ) -> Result<SearchResults<SongResult>, ProviderError> {
         self.check_token()?;
         Ok(SearchResults {
             items: vec![],
+            total_count: 0,
             has_more: false,
         })
     }

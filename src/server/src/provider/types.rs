@@ -17,15 +17,14 @@ impl ProviderId {
     }
 }
 
-/// Per-session provider configuration. A closed enum so each provider can
-/// match on the variant it expects and reject everything else with
-/// `ProviderError::AuthFailed`. Persisted as a JSON blob in
-/// `session_provider_config.config_json`.
+/// Opaque per-session provider config envelope. Persisted as a JSON blob in
+/// `session_provider_config.config_json`. Each provider module defines its
+/// own strongly-typed config struct and converts via `From`/`TryFrom`; this
+/// type is what crosses the repo/factory boundary so adding a new provider
+/// doesn't touch any central enum.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ProviderConfig {
-    BasicAuth { username: String, password: String },
-}
+#[serde(transparent)]
+pub struct ProviderConfig(pub serde_json::Value);
 
 /// A capability that a provider may support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +55,17 @@ pub struct Song {
     pub extra: SongExtra,
 }
 
+/// A song as returned from a search endpoint. Carries only the fields
+/// providers actually populate in list results — resolve to a full `Song`
+/// via `ProviderSession::get_song` when `duration`/`extra` are needed.
+#[derive(Debug, Clone)]
+pub struct SongResult {
+    pub provider: ProviderId,
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+}
+
 /// Provider-specific song metadata.
 #[derive(Debug, Clone)]
 pub enum SongExtra {
@@ -67,10 +77,13 @@ pub enum SongExtra {
     YouTube(YouTubeSongExtra),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DamSongExtra {
     pub vocal_types: Vec<DamVocalType>,
     pub has_scoring: bool,
+    pub score_level: u32,
+    pub technical_level: u32,
+    pub shift: i32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +119,7 @@ pub struct Artist {
 #[derive(Debug, Clone)]
 pub struct SearchResults<T> {
     pub items: Vec<T>,
+    pub total_count: u32,
     pub has_more: bool,
 }
 

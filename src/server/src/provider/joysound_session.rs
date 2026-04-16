@@ -42,7 +42,7 @@ impl Searchable for JoysoundProviderSession {
         &self,
         _query: &str,
         _page: u32,
-    ) -> Result<SearchResults<Song>, ProviderError> {
+    ) -> Result<SearchResults<SongResult>, ProviderError> {
         // TODO: implement real API call
         Err(ProviderError::NotSupported)
     }
@@ -60,7 +60,7 @@ impl Searchable for JoysoundProviderSession {
         &self,
         _artist_id: &str,
         _page: u32,
-    ) -> Result<SearchResults<Song>, ProviderError> {
+    ) -> Result<SearchResults<SongResult>, ProviderError> {
         // TODO: implement real API call
         Err(ProviderError::NotSupported)
     }

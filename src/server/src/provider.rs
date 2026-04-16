@@ -1,6 +1,5 @@
 pub mod cache;
 pub mod dam;
-pub mod dam_session;
 pub mod error;
 pub mod joysound;
 pub mod joysound_session;
@@ -15,7 +14,7 @@ use std::sync::Arc;
 use error::ProviderError;
 use types::{
     Artist, Lyrics, MediaStream, ProviderConfig, ProviderId, ProviderMetadata, ScoringData,
-    SearchResults, Song,
+    SearchResults, Song, SongResult,
 };
 
 use crate::provider::dam::DamProvider;
@@ -58,7 +57,7 @@ pub trait Searchable: Send + Sync {
         &self,
         query: &str,
         page: u32,
-    ) -> Result<SearchResults<Song>, ProviderError>;
+    ) -> Result<SearchResults<SongResult>, ProviderError>;
     async fn search_artists(
         &self,
         query: &str,
@@ -68,7 +67,7 @@ pub trait Searchable: Send + Sync {
         &self,
         artist_id: &str,
         page: u32,
-    ) -> Result<SearchResults<Song>, ProviderError>;
+    ) -> Result<SearchResults<SongResult>, ProviderError>;
 }
 
 /// Providers that can return lyrics data.
@@ -121,6 +120,38 @@ impl Provider {
             Provider::YouTube(p) => p.configure(config).await,
             #[cfg(any(test, feature = "test-support"))]
             Provider::Mock(p) => p.configure(config).await,
+        }
+    }
+
+    /// Adapter between the proto schema (flat `username`/`password`) and each
+    /// provider's typed config. Stateless providers return a `null` envelope.
+    // TODO: delete once `ConfigureProviderRequest` gains per-provider oneofs.
+    pub fn build_config_from_basic_auth(
+        &self,
+        username: String,
+        password: String,
+    ) -> ProviderConfig {
+        match self {
+            Provider::Dam(_) => dam::DamConfig { username, password }.into(),
+            Provider::Joysound(_) => joysound::JoysoundConfig { username, password }.into(),
+            Provider::YouTube(_) => ProviderConfig(serde_json::Value::Null),
+            #[cfg(any(test, feature = "test-support"))]
+            Provider::Mock(_) => mock::MockConfig { username, password }.into(),
+        }
+    }
+
+    /// Best-effort extraction of a display username from a stored config,
+    /// dispatched to the owning provider. Returns `None` for providers that
+    /// don't have a username (e.g. YouTube) or whose config doesn't parse.
+    pub fn username_from_config(&self, config: &ProviderConfig) -> Option<String> {
+        match self {
+            Provider::Dam(_) => dam::DamConfig::try_from(config).ok().map(|c| c.username),
+            Provider::Joysound(_) => joysound::JoysoundConfig::try_from(config)
+                .ok()
+                .map(|c| c.username),
+            Provider::YouTube(_) => None,
+            #[cfg(any(test, feature = "test-support"))]
+            Provider::Mock(_) => mock::MockConfig::try_from(config).ok().map(|c| c.username),
         }
     }
 }

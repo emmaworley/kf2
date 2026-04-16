@@ -162,10 +162,10 @@ mod tests {
     }
 
     fn sample_config() -> ProviderConfig {
-        ProviderConfig::BasicAuth {
-            username: "alice".into(),
-            password: "hunter2".into(),
-        }
+        ProviderConfig(serde_json::json!({
+            "username": "alice",
+            "password": "hunter2",
+        }))
     }
 
     fn assert_basic_auth(
@@ -173,9 +173,8 @@ mod tests {
         expected_username: &str,
         expected_password: &str,
     ) {
-        let ProviderConfig::BasicAuth { username, password } = config;
-        assert_eq!(username, expected_username);
-        assert_eq!(password, expected_password);
+        assert_eq!(config.0["username"], expected_username);
+        assert_eq!(config.0["password"], expected_password);
     }
 
     #[tokio::test]
@@ -190,10 +189,10 @@ mod tests {
             .upsert(
                 &s.id,
                 ProviderId::Dam,
-                ProviderConfig::BasicAuth {
-                    username: "bob".into(),
-                    password: "s3cret".into(),
-                },
+                ProviderConfig(serde_json::json!({
+                    "username": "bob",
+                    "password": "s3cret",
+                })),
             )
             .await
             .unwrap();

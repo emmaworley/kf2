@@ -9,16 +9,10 @@ use kf2_proto::kf2::{
 use tonic::{Request, Response, Status};
 
 use crate::AppState;
-use crate::provider::types::{ProviderConfig, ProviderId};
+use crate::provider::types::ProviderId;
 
 pub struct SessionServiceImpl {
     pub state: Arc<AppState>,
-}
-
-fn config_username(config: &ProviderConfig) -> Option<String> {
-    match config {
-        ProviderConfig::BasicAuth { username, .. } => Some(username.clone()),
-    }
 }
 
 impl SessionServiceImpl {
@@ -51,10 +45,7 @@ impl SessionService for SessionServiceImpl {
             .ok_or_else(|| Status::not_found("provider not available on this server"))?
             .clone();
 
-        let config = ProviderConfig::BasicAuth {
-            username: inner.username,
-            password: inner.password,
-        };
+        let config = factory.build_config_from_basic_auth(inner.username, inner.password);
 
         // Upsert first so a concurrent data RPC on the same (session, provider)
         // has a row to read. We'll roll it back if eager-validate fails.
@@ -121,10 +112,16 @@ impl SessionService for SessionServiceImpl {
             .get(&inner.session_id, provider_id)
             .await?;
 
+        let factory = self.state.providers.get(provider_id);
+        let username = config
+            .as_ref()
+            .zip(factory)
+            .and_then(|(c, f)| f.username_from_config(c));
+
         let status = ProviderStatus {
             provider: inner.provider,
             is_configured: config.is_some(),
-            username: config.and_then(|c| config_username(&c)),
+            username,
         };
         Ok(Response::new(GetProviderStatusResponse {
             status: Some(status),
@@ -146,10 +143,17 @@ impl SessionService for SessionServiceImpl {
 
         let providers = rows
             .into_iter()
-            .map(|(provider_id, config)| ProviderStatus {
-                provider: provider_id.into(),
-                is_configured: true,
-                username: config_username(&config),
+            .map(|(provider_id, config)| {
+                let username = self
+                    .state
+                    .providers
+                    .get(provider_id)
+                    .and_then(|f| f.username_from_config(&config));
+                ProviderStatus {
+                    provider: provider_id.into(),
+                    is_configured: true,
+                    username,
+                }
             })
             .collect();
         Ok(Response::new(ListConfiguredProvidersResponse { providers }))
@@ -200,7 +204,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(config_username(&config).as_deref(), Some("alice"));
+        assert_eq!(config.0["username"], "alice");
 
         // Cache has an entry.
         assert!(

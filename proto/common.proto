@@ -1,0 +1,12 @@
+syntax = "proto3";
+package kf2;
+
+// Shared type vocabulary used across multiple services (ProviderService,
+// SessionService, ...). Types that belong to a single service should live
+// in that service's .proto file instead.
+
+enum ProviderType {
+  PROVIDER_DAM = 0;
+  PROVIDER_JOYSOUND = 1;
+  PROVIDER_YOUTUBE = 2;
+}

@@ -2,7 +2,7 @@ use crate::provider::error::ProviderError;
 use crate::provider::types::*;
 use crate::provider::{ProviderSession, ScoringProvider, Searchable};
 use backon::{ExponentialBuilder, Retryable};
-use reqwest::{header, Url};
+use reqwest::{Url, header};
 use serde::de::{DeserializeOwned, IgnoredAny};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, LazyLock};

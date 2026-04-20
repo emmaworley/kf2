@@ -15,17 +15,35 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
+use server::hls::{HlsEvent, ProgressReporter};
 use server::provider::dam::{DamConfig, DamProvider, DamProviderSession, LoginData};
+use server::provider::types::MediaStream;
 use server::provider::{ProviderSession, Searchable};
 
 const DOTFILE_NAME: &str = ".dam-tool.json";
+
+struct StderrProgress;
+
+impl ProgressReporter for StderrProgress {
+    fn report(&self, event: HlsEvent<'_>) {
+        match event {
+            HlsEvent::PlaylistParsed { segment_count } => {
+                eprintln!("playlist: {segment_count} segments");
+            }
+            HlsEvent::SegmentComplete { index, total } => {
+                eprintln!("[{}/{}] seg_{:05}.ts", index + 1, total, index);
+            }
+            HlsEvent::InitSegmentComplete { url } => {
+                eprintln!("init segment: {url}");
+            }
+        }
+    }
+}
 
 /// On-disk shape for `./.dam-tool.json`. Tool-local so the wire types in
 /// `server::provider::dam` don't need `Serialize` just to be persisted here.
 #[derive(Debug, Serialize, Deserialize)]
 struct StoredSession {
-    /// The login username. Sent as `userCode` in Minsei requests — see
-    /// `DamProviderSession::user_code`.
     user_code: String,
     damtomo_id: String,
     auth_token: String,
@@ -45,8 +63,7 @@ impl StoredSession {
 #[command(
     name = "dam-tool",
     about = "CLI tool for DAM",
-    long_about = "DAM provider direct query utility. \
-                  Session tokens persist in ./.dam-tool.json via `login --write`."
+    long_about = "DAM provider direct query utility."
 )]
 struct Cli {
     /// Upstream HTTP proxy, e.g. http://127.0.0.1:8080. Applies to this
@@ -63,9 +80,7 @@ struct Cli {
     proxy_pass: Option<String>,
 
     /// Log every DAM HTTP request and response to stderr. Sensitive values
-    /// (password, authKey, authToken) are redacted in request logs; response
-    /// bodies are printed verbatim and may contain your session tokens, so
-    /// avoid pasting them publicly.
+    /// (password, authToken) are redacted in request logs.
     #[arg(short, long, global = true)]
     debug: bool,
 
@@ -82,47 +97,68 @@ struct ProxyArgs<'a> {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Log in to DAM and print the response. Use `--write` to persist the
-    /// credentials to ./.dam-tool.json on success.
+    /// Log in to DAM and print the response. Writes to ./.dam-tool.json on success, use
+    /// `--no-write` to suppress this behavior.
     Login {
         #[arg(short, long, env = "DAM_USERNAME")]
         username: String,
         #[arg(short, long, env = "DAM_PASSWORD", num_args = 0..=1, default_missing_value = "")]
         password: Option<String>,
-        /// Persist the credentials to ./.dam-tool.json on successful login.
         #[arg(long)]
-        write: bool,
+        no_write: bool,
     },
     /// Print current proxy and stored-credential state.
     Status,
 
+    /// Search the DAM catalog.
+    #[command(subcommand)]
+    Search(SearchCommand),
+
+    /// Fetch song data (metadata, media stream, etc) from the DAM catalog
+    Song {
+        song_id: String,
+        #[command(subcommand)]
+        command: SongCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum SearchCommand {
     /// Search songs by query string.
-    SearchSongs {
+    Song {
         query: String,
         /// Zero-indexed page number (page 0 is the first page).
         #[arg(long, default_value_t = 0)]
         page: u32,
     },
     /// Search artists by query string.
-    SearchArtists {
+    Artists {
         query: String,
         /// Zero-indexed page number (page 0 is the first page).
         #[arg(long, default_value_t = 0)]
         page: u32,
     },
     /// List songs for a given artist id.
-    SongsByArtist {
+    ByArtist {
         artist_id: String,
         /// Zero-indexed page number (page 0 is the first page).
         #[arg(long, default_value_t = 0)]
         page: u32,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum SongCommand {
     /// Fetch a song's metadata by id.
-    GetSong { song_id: String },
+    Metadata,
     /// Fetch a song's media stream URL(s) by id.
-    GetStream { song_id: String },
+    Stream {
+        /// Output directory. If no directory is provided, defaults to `./<song_id>/`.
+        #[arg(short, long, num_args = 0..=1, require_equals = true, default_missing_value = "")]
+        output: Option<String>,
+    },
     /// Fetch a song's scoring / piano-roll data by id.
-    GetScoring { song_id: String },
+    Scoring,
 }
 
 #[tokio::main]
@@ -154,7 +190,7 @@ async fn dispatch(cli: Cli) -> Result<()> {
         Commands::Login {
             username,
             password,
-            write,
+            no_write,
         } => {
             let password = match password.as_deref() {
                 Some(p) if !p.is_empty() => p.to_string(),
@@ -165,9 +201,9 @@ async fn dispatch(cli: Cli) -> Result<()> {
             let cfg = DamConfig { username, password };
             let resp = DamProvider::login(&client, &cfg).await?;
             println!("{resp:#?}");
-            if write {
+            if !no_write {
                 save_session(&StoredSession::from_login(cfg.username.clone(), &resp.data))?;
-                eprintln!("warning: wrote auth token to {}", dotfile_path().display());
+                eprintln!("wrote auth token to {}", dotfile_path().display());
             }
             Ok(())
         }
@@ -192,48 +228,77 @@ async fn dispatch(cli: Cli) -> Result<()> {
             }
             Ok(())
         }
-        Commands::SearchSongs { query, page } => {
-            let session = session(proxy)?;
-            let searchable = as_searchable(&session);
-            let result = searchable.search_songs(&query, page).await?;
-            println!("{result:#?}");
-            Ok(())
-        }
-        Commands::SearchArtists { query, page } => {
-            let session = session(proxy)?;
-            let searchable = as_searchable(&session);
-            let result = searchable.search_artists(&query, page).await?;
-            println!("{result:#?}");
-            Ok(())
-        }
-        Commands::SongsByArtist { artist_id, page } => {
-            let session = session(proxy)?;
-            let searchable = as_searchable(&session);
-            let result = searchable.songs_by_artist(&artist_id, page).await?;
-            println!("{result:#?}");
-            Ok(())
-        }
-        Commands::GetSong { song_id } => {
-            let session = session(proxy)?;
-            let result = session.get_song(&song_id).await?;
-            println!("{result:#?}");
-            Ok(())
-        }
-        Commands::GetStream { song_id } => {
-            let session = session(proxy)?;
-            let result = session.get_stream(&song_id).await?;
-            println!("{result:#?}");
-            Ok(())
-        }
-        Commands::GetScoring { song_id } => {
-            let session = session(proxy)?;
-            let scoring = session
-                .as_scoring_provider()
-                .ok_or_else(|| anyhow!("DAM session does not expose the scoring capability"))?;
-            let result = scoring.get_scoring(&song_id).await?;
-            println!("{result:#?}");
-            Ok(())
-        }
+        Commands::Search(search) => match search {
+            SearchCommand::Song { query, page } => {
+                let session = session(proxy)?;
+                let searchable = as_searchable(&session);
+                let result = searchable.search_songs(&query, page).await?;
+                println!("{result:#?}");
+                Ok(())
+            }
+            SearchCommand::Artists { query, page } => {
+                let session = session(proxy)?;
+                let searchable = as_searchable(&session);
+                let result = searchable.search_artists(&query, page).await?;
+                println!("{result:#?}");
+                Ok(())
+            }
+            SearchCommand::ByArtist { artist_id, page } => {
+                let session = session(proxy)?;
+                let searchable = as_searchable(&session);
+                let result = searchable.songs_by_artist(&artist_id, page).await?;
+                println!("{result:#?}");
+                Ok(())
+            }
+        },
+        Commands::Song { song_id, command } => match command {
+            SongCommand::Metadata => {
+                let session = session(proxy)?;
+                let result = session.get_song(&song_id).await?;
+                println!("{result:#?}");
+                Ok(())
+            }
+            SongCommand::Stream { output } => {
+                let session = session(proxy)?;
+                let stream = session.get_stream(&song_id).await?;
+
+                let Some(output) = output else {
+                    println!("{stream:#?}");
+                    return Ok(());
+                };
+
+                let url = match stream {
+                    MediaStream::Hls { url_high, .. } => url_high,
+                    other => return Err(anyhow!("expected HLS stream, got {other:?}")),
+                };
+                let output_dir = PathBuf::from(if output.is_empty() {
+                    song_id.as_str()
+                } else {
+                    output.as_str()
+                });
+
+                eprintln!("downloading: {url}");
+                let hls_client = build_client(proxy)?;
+                let result =
+                    server::hls::download_hls(&hls_client, &url, &output_dir, &StderrProgress)
+                        .await?;
+                eprintln!(
+                    "wrote {} segments to {}",
+                    result.segment_count,
+                    result.playlist_path.display()
+                );
+                Ok(())
+            }
+            SongCommand::Scoring => {
+                let session = session(proxy)?;
+                let scoring = session
+                    .as_scoring_provider()
+                    .ok_or_else(|| anyhow!("DAM session does not expose the scoring capability"))?;
+                let result = scoring.get_scoring(&song_id).await?;
+                println!("{result:#?}");
+                Ok(())
+            }
+        },
     }
 }
 

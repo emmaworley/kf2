@@ -18,5 +18,9 @@ target
 *.db-wal
 *.db-shm
 
-# Claude local settings
+# dam-tool credentials dotfile
+.dam-tool.json
+
+# Claude locals
 .claude/settings.local.json
+.claude/scheduled_tasks.lock

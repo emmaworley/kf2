@@ -15,10 +15,10 @@ use std::sync::Arc;
 use anyhow::{Context, Result, anyhow};
 use clap::{Parser, Subcommand};
 use serde::{Deserialize, Serialize};
-use server::hls::{HlsEvent, ProgressReporter};
 use server::provider::dam::{DamConfig, DamProvider, DamProviderSession, LoginData};
 use server::provider::types::MediaStream;
 use server::provider::{ProviderSession, Searchable};
+use server::tools::hls::{HlsEvent, ProgressReporter};
 
 const DOTFILE_NAME: &str = ".dam-tool.json";
 
@@ -279,9 +279,13 @@ async fn dispatch(cli: Cli) -> Result<()> {
 
                 eprintln!("downloading: {url}");
                 let hls_client = build_client(proxy)?;
-                let result =
-                    server::hls::download_hls(&hls_client, &url, &output_dir, &StderrProgress)
-                        .await?;
+                let result = server::tools::hls::download_hls(
+                    &hls_client,
+                    &url,
+                    &output_dir,
+                    &StderrProgress,
+                )
+                .await?;
                 eprintln!(
                     "wrote {} segments to {}",
                     result.segment_count,

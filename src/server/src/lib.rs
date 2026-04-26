@@ -1,21 +1,22 @@
 pub mod api;
 pub mod cli;
 pub mod db;
-pub mod hls;
 pub mod models;
 pub mod provider;
 pub mod repo;
+pub mod tools;
 
 use std::sync::Arc;
 
 use crate::provider::cache::ProviderCache;
 use crate::repo::diesel_impl::{DieselProviderConfigRepo, DieselSessionRepo};
 use crate::repo::{ProviderConfigRepo, SessionRepo};
+use crate::tools::{FFmpeg, YtDlp};
 use anyhow::{Context, Result};
-use axum::Router;
 use axum::body::Body;
 use axum::http::{Response, StatusCode};
 use axum::response::IntoResponse;
+use axum::Router;
 use kf2_proto::kf2::provider_service_server::ProviderServiceServer;
 use kf2_proto::kf2::session_manager_service_server::SessionManagerServiceServer;
 use kf2_proto::kf2::session_service_server::SessionServiceServer;
@@ -66,6 +67,8 @@ pub struct AppState {
     pub config: AppConfig,
     pub providers: provider::ProviderRegistry,
     pub provider_cache: ProviderCache,
+    pub ytdlp: Option<Arc<YtDlp>>,
+    pub ffmpeg: Option<Arc<FFmpeg>>,
 }
 
 /// Initialize the database, run migrations, and register all providers.
@@ -80,6 +83,18 @@ pub async fn build_app(config: AppConfig) -> Result<Arc<AppState>> {
     let provider_configs: Arc<dyn ProviderConfigRepo> =
         Arc::new(DieselProviderConfigRepo::new(pool));
 
+    let ytdlp = YtDlp::probe();
+    match &ytdlp {
+        Some(t) => eprintln!("yt-dlp {} at {}", t.version, t.path.display()),
+        None => eprintln!("yt-dlp not found, YouTube provider disabled"),
+    }
+
+    let ffmpeg = FFmpeg::probe();
+    match &ffmpeg {
+        Some(t) => eprintln!("ffmpeg {} at {}", t.version, t.path.display()),
+        None => eprintln!("ffmpeg not found, downstream features that need it will be unavailable"),
+    }
+
     let mut registry = provider::ProviderRegistry::default();
     registry.register(Arc::new(provider::Provider::Dam(
         provider::dam::DamProvider,
@@ -87,15 +102,10 @@ pub async fn build_app(config: AppConfig) -> Result<Arc<AppState>> {
     registry.register(Arc::new(provider::Provider::Joysound(
         provider::joysound::JoysoundProvider,
     )));
-    if let Some(yt) = provider::youtube::YouTubeProvider::new() {
-        eprintln!(
-            "YouTube provider enabled (yt-dlp {} at {})",
-            yt.ytdlp_version,
-            yt.ytdlp_path.display()
-        );
-        registry.register(Arc::new(provider::Provider::YouTube(yt)));
-    } else {
-        eprintln!("yt-dlp not found, YouTube provider disabled");
+    if let Some(yt) = ytdlp.clone() {
+        registry.register(Arc::new(provider::Provider::YouTube(
+            provider::youtube::YouTubeProvider::new(yt),
+        )));
     }
 
     Ok(Arc::new(AppState {
@@ -104,6 +114,8 @@ pub async fn build_app(config: AppConfig) -> Result<Arc<AppState>> {
         config,
         providers: registry,
         provider_cache: ProviderCache::new(),
+        ytdlp,
+        ffmpeg,
     }))
 }
 
@@ -248,6 +260,8 @@ pub mod test_support {
             config: dummy_config(),
             providers: registry,
             provider_cache: ProviderCache::new(),
+            ytdlp: None,
+            ffmpeg: None,
         })
     }
 }

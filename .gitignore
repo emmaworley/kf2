@@ -13,13 +13,14 @@ target
 # Contains mutation testing data
 **/mutants.out*/
 
-# Runtime database
+# Runtime files
 *.db
 *.db-wal
 *.db-shm
+.kf2-cache/
 
-# dam-tool credentials dotfile
-.dam-tool.json
+# asset-tool per-provider credential dotfiles
+.asset-tool.*.json
 
 # Claude locals
 .claude/settings.local.json

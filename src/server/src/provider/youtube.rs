@@ -38,7 +38,7 @@ impl ProviderSession for YouTubeProvider {
         Err(ProviderError::NotSupported)
     }
 
-    async fn get_stream(&self, _song_id: &str) -> Result<MediaStream, ProviderError> {
+    async fn get_asset(&self, _song_id: &str) -> Result<Asset, ProviderError> {
         // TODO: implement real download logic
         Err(ProviderError::NotSupported)
     }

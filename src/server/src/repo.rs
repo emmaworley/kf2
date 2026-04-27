@@ -38,6 +38,24 @@ pub trait SessionRepo: Send + Sync {
     async fn delete(&self, id: &str) -> Result<bool, RepoError>;
 }
 
+/// One row in the `asset_cache` table: a stable URN-shaped `asset_id`
+/// pointing at a file (or playlist) sitting somewhere under the configured
+/// cache directory. `relative_path` is interpreted by the cache service
+/// against `cache_dir`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AssetCacheEntry {
+    pub asset_id: String,
+    pub relative_path: String,
+}
+
+#[async_trait]
+pub trait AssetCacheRepo: Send + Sync {
+    async fn get(&self, asset_id: &str) -> Result<Option<AssetCacheEntry>, RepoError>;
+    async fn upsert(&self, entry: AssetCacheEntry) -> Result<(), RepoError>;
+    async fn delete(&self, asset_id: &str) -> Result<bool, RepoError>;
+    async fn list(&self) -> Result<Vec<AssetCacheEntry>, RepoError>;
+}
+
 #[async_trait]
 pub trait ProviderConfigRepo: Send + Sync {
     async fn upsert(

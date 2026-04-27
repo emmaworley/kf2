@@ -13,6 +13,10 @@ pub struct CliArgs {
     #[arg(long)]
     pub db_path: Option<String>,
 
+    /// Asset cache directory (overrides config)
+    #[arg(long)]
+    pub cache_dir: Option<String>,
+
     /// Server listen address, e.g. `127.0.0.1:3000` (overrides config)
     #[arg(long)]
     pub listen_addr: Option<String>,
@@ -32,6 +36,7 @@ pub fn parse_cli_args() -> Result<AppConfig, Box<dyn std::error::Error>> {
     let mut builder = Config::builder()
         .set_default("database.path", "kf2.db")?
         .set_default("server.listen_addr", "127.0.0.1:3000")?
+        .set_default("cache.dir", ".kf2-cache")?
         .set_default("projector.root", "src/frontend/packages/projector/dist")?
         .set_default("remocon.root", "src/frontend/packages/remocon/dist")?
         .add_source(File::with_name(&cli.config).required(false))
@@ -39,6 +44,9 @@ pub fn parse_cli_args() -> Result<AppConfig, Box<dyn std::error::Error>> {
 
     if let Some(db_path) = cli.db_path {
         builder = builder.set_override("database.path", db_path)?;
+    }
+    if let Some(cache_dir) = cli.cache_dir {
+        builder = builder.set_override("cache.dir", cache_dir)?;
     }
     if let Some(listen_addr) = cli.listen_addr {
         builder = builder.set_override("server.listen_addr", listen_addr)?;

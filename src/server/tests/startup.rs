@@ -6,7 +6,7 @@
 
 use anyhow::Context;
 use server::db;
-use server::{AppConfig, DatabaseConfig, FrontendConfig, ServerConfig};
+use server::{AppConfig, CacheConfig, DatabaseConfig, FrontendConfig, ServerConfig};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 use tempfile::TempDir;
@@ -22,6 +22,9 @@ fn test_config(tmp: &TempDir, db_name: &str) -> AppConfig {
         },
         server: ServerConfig {
             listen_addr: "127.0.0.1:0".to_string(),
+        },
+        cache: CacheConfig {
+            dir: tmp.path().join("cache").to_string_lossy().into_owned(),
         },
         projector: FrontendConfig { root: root.clone() },
         remocon: FrontendConfig { root },
@@ -112,6 +115,9 @@ async fn frontend_reverse_proxies_to_dev_server() {
         },
         server: ServerConfig {
             listen_addr: "127.0.0.1:0".to_string(),
+        },
+        cache: CacheConfig {
+            dir: tmp.path().join("cache").to_string_lossy().into_owned(),
         },
         projector: FrontendConfig {
             root: format!("http://{mock_addr}"),

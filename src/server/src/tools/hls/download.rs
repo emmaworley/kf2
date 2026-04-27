@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 
 use aes::Aes128;
+use backon::{ExponentialBuilder, Retryable};
 use cbc::cipher::{BlockDecryptMut, KeyIvInit};
 use reqwest::Client;
 
@@ -10,6 +12,37 @@ use super::progress::{HlsEvent, ProgressReporter};
 use super::types::*;
 
 type Aes128CbcDec = cbc::Decryptor<Aes128>;
+
+/// Per-HTTP-request retry policy. DAM's CDN occasionally 403s a signed URL
+/// that's hit too quickly after issuance and starts serving on the next
+/// attempt; 5xx and connection-level errors are typically transient too.
+/// Playlist URLs are sometimes one-time-use, so the *outer* re-mint loop
+/// (in asset-tool / future server orchestration) handles those — this just
+/// smooths over per-request hiccups.
+fn http_backoff() -> ExponentialBuilder {
+    ExponentialBuilder::default()
+        .with_max_times(4)
+        .with_min_delay(Duration::from_secs(1))
+        .with_max_delay(Duration::from_secs(5))
+        .with_jitter()
+}
+
+fn is_retryable(e: &HlsError) -> bool {
+    match e {
+        HlsError::Http(e) => is_retryable_http(e),
+        _ => false,
+    }
+}
+
+fn is_retryable_http(err: &reqwest::Error) -> bool {
+    if err.is_timeout() || err.is_connect() {
+        return true;
+    }
+    match err.status() {
+        Some(s) => s.is_server_error() || matches!(s.as_u16(), 403 | 408 | 429),
+        None => false,
+    }
+}
 
 pub async fn download_playlist(
     client: &Client,
@@ -132,13 +165,18 @@ async fn fetch_data(
     url: &str,
     byte_range: Option<&InitByteRange>,
 ) -> Result<Vec<u8>, HlsError> {
-    let mut request = client.get(url);
-    if let Some(br) = byte_range {
-        let end = br.offset + br.length - 1;
-        request = request.header("Range", format!("bytes={}-{end}", br.offset));
-    }
-    let bytes = request.send().await?.error_for_status()?.bytes().await?;
-    Ok(bytes.to_vec())
+    (|| async {
+        let mut request = client.get(url);
+        if let Some(br) = byte_range {
+            let end = br.offset + br.length - 1;
+            request = request.header("Range", format!("bytes={}-{end}", br.offset));
+        }
+        let bytes = request.send().await?.error_for_status()?.bytes().await?;
+        Ok(bytes.to_vec())
+    })
+    .retry(http_backoff())
+    .when(is_retryable)
+    .await
 }
 
 async fn fetch_key(
@@ -149,13 +187,18 @@ async fn fetch_key(
     if let Some(key) = cache.get(key_url) {
         return Ok(*key);
     }
-    let bytes = client
-        .get(key_url)
-        .send()
-        .await?
-        .error_for_status()?
-        .bytes()
-        .await?;
+    let bytes = (|| async {
+        client
+            .get(key_url)
+            .send()
+            .await?
+            .error_for_status()?
+            .bytes()
+            .await
+    })
+    .retry(http_backoff())
+    .when(is_retryable_http)
+    .await?;
     if bytes.len() != 16 {
         return Err(HlsError::Decryption {
             segment: key_url.to_string(),

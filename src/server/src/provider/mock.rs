@@ -128,11 +128,14 @@ impl ProviderSession for MockProviderSession {
         })
     }
 
-    async fn get_stream(&self, _song_id: &str) -> Result<MediaStream, ProviderError> {
+    async fn get_asset(&self, song_id: &str) -> Result<Asset, ProviderError> {
         self.check_token()?;
-        Ok(MediaStream::Hls {
-            url_high: "https://mock/high.m3u8".into(),
-            url_low: None,
+        Ok(Asset {
+            id: AssetId::new(self.id, format!("songId:{song_id}")),
+            source: MediaStream::Hls {
+                url_high: "https://mock/high.m3u8".into(),
+                url_low: None,
+            },
         })
     }
 

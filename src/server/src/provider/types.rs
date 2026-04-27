@@ -1,3 +1,5 @@
+use std::fmt;
+use std::str::FromStr;
 use std::time::Duration;
 
 /// Identifies which provider a piece of data came from.
@@ -14,6 +16,100 @@ pub enum ProviderId {
 impl ProviderId {
     pub fn as_str(&self) -> &'static str {
         self.into()
+    }
+}
+
+/// Stable URN identifying a piece of media. The wire format is
+/// `urn:<provider_id>:<body>`, where `body` is provider-defined and may
+/// contain further colon-separated qualifiers — DAM, for instance, prefixes
+/// its content id with the field it came from so the URN reads
+/// `urn:dam:contentsId:5778352`. If a provider ever switches keying schemes
+/// the qualifier changes too, leaving old cache rows obviously distinguishable.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AssetId {
+    provider: ProviderId,
+    body: String,
+}
+
+impl AssetId {
+    pub fn new(provider: ProviderId, body: impl Into<String>) -> Self {
+        Self {
+            provider,
+            body: body.into(),
+        }
+    }
+
+    pub fn provider(&self) -> ProviderId {
+        self.provider
+    }
+
+    pub fn body(&self) -> &str {
+        &self.body
+    }
+}
+
+impl fmt::Display for AssetId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "urn:{}:{}", self.provider.as_str(), self.body)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AssetIdParseError {
+    #[error("expected URN of form `urn:<provider>:<body>`, got `{0}`")]
+    BadShape(String),
+    #[error("unknown provider `{0}`")]
+    UnknownProvider(String),
+    #[error("empty body in URN `{0}`")]
+    EmptyBody(String),
+}
+
+impl FromStr for AssetId {
+    type Err = AssetIdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // "urn:<provider>:<body>" — split off the first two segments and
+        // keep everything past the second colon (including any further
+        // colon-separated qualifiers) verbatim in `body`.
+        let rest = s
+            .strip_prefix("urn:")
+            .ok_or_else(|| AssetIdParseError::BadShape(s.into()))?;
+        let (provider_str, body) = rest
+            .split_once(':')
+            .ok_or_else(|| AssetIdParseError::BadShape(s.into()))?;
+        if body.is_empty() {
+            return Err(AssetIdParseError::EmptyBody(s.into()));
+        }
+        let provider = ProviderId::from_str(provider_str)
+            .map_err(|_| AssetIdParseError::UnknownProvider(provider_str.into()))?;
+        Ok(AssetId::new(provider, body))
+    }
+}
+
+impl From<AssetId> for String {
+    fn from(id: AssetId) -> String {
+        id.to_string()
+    }
+}
+
+impl TryFrom<String> for AssetId {
+    type Error = AssetIdParseError;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl serde::Serialize for AssetId {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for AssetId {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(d)?;
+        raw.parse().map_err(serde::de::Error::custom)
     }
 }
 
@@ -175,6 +271,17 @@ pub struct ScoringNote {
     pub pitch: u8,
     pub start_ms: u64,
     pub duration_ms: u64,
+}
+
+/// What providers return as the "this is what we'll play" output: a stable
+/// URN identity plus the remote location to fetch it from. The asset cache
+/// transforms an `Asset` into a `CachedAsset` (in `crate::asset_cache`) by
+/// downloading `source` to local storage; the `id` is what survives across
+/// processes and gets stored in the `asset_cache` table.
+#[derive(Debug, Clone)]
+pub struct Asset {
+    pub id: AssetId,
+    pub source: MediaStream,
 }
 
 /// How to actually play a song.

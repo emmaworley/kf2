@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
-/// When set to a truthy value in the environment, `dam-tool` (and any other
+/// When set to a truthy value in the environment, `asset-tool` (and any other
 /// in-process user of this module) will log every HTTP request and response
 /// to stderr for debugging. Read once at first access; set the env var
 /// before constructing a `DamProviderSession`.
@@ -242,6 +242,7 @@ struct StreamingUrlsPayload {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct StreamingUrlsListItem {
+    contents_id: String,
     duet: String,
     high_bitrate_url: String,
     low_bitrate_url: String,
@@ -381,7 +382,7 @@ impl From<SearchArtistListItem> for Artist {
     }
 }
 
-impl TryFrom<StreamingUrlsPayload> for MediaStream {
+impl TryFrom<StreamingUrlsPayload> for Asset {
     type Error = ProviderError;
 
     fn try_from(p: StreamingUrlsPayload) -> Result<Self, Self::Error> {
@@ -394,9 +395,15 @@ impl TryFrom<StreamingUrlsPayload> for MediaStream {
                 .next()
                 .ok_or_else(|| ProviderError::NotFound("no streaming urls returned".into()))?,
         };
-        Ok(MediaStream::Hls {
-            url_high: picked.high_bitrate_url,
-            url_low: Some(picked.low_bitrate_url),
+        Ok(Asset {
+            id: AssetId::new(
+                ProviderId::Dam,
+                format!("contentsId:{}", picked.contents_id),
+            ),
+            source: MediaStream::Hls {
+                url_high: picked.high_bitrate_url,
+                url_low: Some(picked.low_bitrate_url),
+            },
         })
     }
 }
@@ -586,7 +593,7 @@ impl ProviderSession for DamProviderSession {
         Ok(payload.into())
     }
 
-    async fn get_stream(&self, song_id: &str) -> Result<MediaStream, ProviderError> {
+    async fn get_asset(&self, song_id: &str) -> Result<Asset, ProviderError> {
         let payload: StreamingUrlsPayload = (|| async {
             self.post_minsei(
                 &URL_GET_STREAMING_URL,
@@ -601,7 +608,7 @@ impl ProviderSession for DamProviderSession {
         .retry(minsei_backoff())
         .when(is_retryable)
         .await?;
-        MediaStream::try_from(payload)
+        Asset::try_from(payload)
     }
 
     fn as_searchable(&self) -> Option<&dyn Searchable> {

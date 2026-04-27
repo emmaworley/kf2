@@ -1,6 +1,15 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    asset_cache (asset_id) {
+        asset_id -> Text,
+        relative_path -> Text,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     session (id) {
         id -> Text,
         created_at -> Timestamp,
@@ -20,4 +29,4 @@ diesel::table! {
 
 diesel::joinable!(session_provider_config -> session (session_id));
 
-diesel::allow_tables_to_appear_in_same_query!(session, session_provider_config,);
+diesel::allow_tables_to_appear_in_same_query!(asset_cache, session, session_provider_config,);

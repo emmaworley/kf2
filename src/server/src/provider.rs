@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use error::ProviderError;
 use types::{
-    Artist, Lyrics, MediaStream, ProviderConfig, ProviderId, ProviderMetadata, ScoringData,
+    Artist, Asset, Lyrics, ProviderConfig, ProviderId, ProviderMetadata, ScoringData,
     SearchResults, Song, SongResult,
 };
 
@@ -31,7 +31,7 @@ use crate::provider::youtube::YouTubeProvider;
 #[tonic::async_trait]
 pub trait ProviderSession: Send + Sync {
     async fn get_song(&self, song_id: &str) -> Result<Song, ProviderError>;
-    async fn get_stream(&self, song_id: &str) -> Result<MediaStream, ProviderError>;
+    async fn get_asset(&self, song_id: &str) -> Result<Asset, ProviderError>;
 
     fn as_searchable(&self) -> Option<&dyn Searchable> {
         None

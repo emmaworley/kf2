@@ -1,4 +1,5 @@
 pub mod api;
+pub mod asset_cache;
 pub mod cli;
 pub mod db;
 pub mod models;
@@ -6,17 +7,19 @@ pub mod provider;
 pub mod repo;
 pub mod tools;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
+use crate::asset_cache::AssetCache;
 use crate::provider::cache::ProviderCache;
-use crate::repo::diesel_impl::{DieselProviderConfigRepo, DieselSessionRepo};
-use crate::repo::{ProviderConfigRepo, SessionRepo};
+use crate::repo::diesel_impl::{DieselAssetCacheRepo, DieselProviderConfigRepo, DieselSessionRepo};
+use crate::repo::{AssetCacheRepo, ProviderConfigRepo, SessionRepo};
 use crate::tools::{FFmpeg, YtDlp};
 use anyhow::{Context, Result};
+use axum::Router;
 use axum::body::Body;
 use axum::http::{Response, StatusCode};
 use axum::response::IntoResponse;
-use axum::Router;
 use kf2_proto::kf2::provider_service_server::ProviderServiceServer;
 use kf2_proto::kf2::session_manager_service_server::SessionManagerServiceServer;
 use kf2_proto::kf2::session_service_server::SessionServiceServer;
@@ -31,6 +34,7 @@ use tower_http::services::{ServeDir, ServeFile};
 pub struct AppConfig {
     pub database: DatabaseConfig,
     pub server: ServerConfig,
+    pub cache: CacheConfig,
     pub projector: FrontendConfig,
     pub remocon: FrontendConfig,
 }
@@ -43,6 +47,11 @@ pub struct DatabaseConfig {
 #[derive(Debug, Deserialize, Clone)]
 pub struct ServerConfig {
     pub listen_addr: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct CacheConfig {
+    pub dir: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -64,6 +73,7 @@ impl FrontendConfig {
 pub struct AppState {
     pub sessions: Arc<dyn SessionRepo>,
     pub provider_configs: Arc<dyn ProviderConfigRepo>,
+    pub asset_cache: Arc<AssetCache>,
     pub config: AppConfig,
     pub providers: provider::ProviderRegistry,
     pub provider_cache: ProviderCache,
@@ -81,7 +91,18 @@ pub async fn build_app(config: AppConfig) -> Result<Arc<AppState>> {
 
     let sessions: Arc<dyn SessionRepo> = Arc::new(DieselSessionRepo::new(pool.clone()));
     let provider_configs: Arc<dyn ProviderConfigRepo> =
-        Arc::new(DieselProviderConfigRepo::new(pool));
+        Arc::new(DieselProviderConfigRepo::new(pool.clone()));
+    let asset_cache_repo: Arc<dyn AssetCacheRepo> = Arc::new(DieselAssetCacheRepo::new(pool));
+
+    let cache_dir = PathBuf::from(&config.cache.dir);
+    tokio::fs::create_dir_all(&cache_dir)
+        .await
+        .with_context(|| format!("creating asset cache dir {}", cache_dir.display()))?;
+    let asset_cache = Arc::new(AssetCache::new(
+        cache_dir,
+        asset_cache_repo,
+        reqwest::Client::new(),
+    ));
 
     let ytdlp = YtDlp::probe();
     match &ytdlp {
@@ -111,6 +132,7 @@ pub async fn build_app(config: AppConfig) -> Result<Arc<AppState>> {
     Ok(Arc::new(AppState {
         sessions,
         provider_configs,
+        asset_cache,
         config,
         providers: registry,
         provider_cache: ProviderCache::new(),
@@ -217,22 +239,27 @@ pub mod test_support {
     //! Helpers for constructing an `AppState` in unit tests without touching
     //! the real filesystem config or spinning up a full `build_app`.
 
+    use crate::asset_cache::AssetCache;
     use crate::db::test_support::create_pool_in_memory;
     use crate::provider::cache::ProviderCache;
     use crate::provider::{Provider, ProviderRegistry};
-    use crate::repo::diesel_impl::DieselProviderConfigRepo;
-    use crate::repo::diesel_impl::DieselSessionRepo;
-    use crate::repo::{ProviderConfigRepo, SessionRepo};
-    use crate::{AppConfig, AppState, DatabaseConfig, FrontendConfig, ServerConfig};
+    use crate::repo::diesel_impl::{
+        DieselAssetCacheRepo, DieselProviderConfigRepo, DieselSessionRepo,
+    };
+    use crate::repo::{AssetCacheRepo, ProviderConfigRepo, SessionRepo};
+    use crate::{AppConfig, AppState, CacheConfig, DatabaseConfig, FrontendConfig, ServerConfig};
     use std::sync::Arc;
 
-    fn dummy_config() -> AppConfig {
+    fn dummy_config(cache_dir: &str) -> AppConfig {
         AppConfig {
             database: DatabaseConfig {
                 path: ":memory:".into(),
             },
             server: ServerConfig {
                 listen_addr: "127.0.0.1:0".into(),
+            },
+            cache: CacheConfig {
+                dir: cache_dir.into(),
             },
             projector: FrontendConfig {
                 root: String::new(),
@@ -244,12 +271,24 @@ pub mod test_support {
     }
 
     /// Build a fully-migrated `AppState` backed by a named in-memory SQLite
-    /// database, with the given providers registered.
+    /// database, with the given providers registered. The asset cache is
+    /// rooted at a fresh `tempdir` per call; the returned `TempDir` is
+    /// leaked into a `Box::leak` so callers don't need to plumb a guard
+    /// around — every test gets its own filesystem scope and the OS reaps
+    /// the dirs on process exit.
     pub async fn test_app_state(db_name: &str, providers: Vec<Arc<Provider>>) -> Arc<AppState> {
         let pool = create_pool_in_memory(db_name).await.unwrap();
         let sessions: Arc<dyn SessionRepo> = Arc::new(DieselSessionRepo::new(pool.clone()));
         let provider_configs: Arc<dyn ProviderConfigRepo> =
-            Arc::new(DieselProviderConfigRepo::new(pool));
+            Arc::new(DieselProviderConfigRepo::new(pool.clone()));
+        let asset_cache_repo: Arc<dyn AssetCacheRepo> = Arc::new(DieselAssetCacheRepo::new(pool));
+        let cache_tmp = Box::leak(Box::new(tempfile::tempdir().unwrap()));
+        let cache_dir = cache_tmp.path().to_path_buf();
+        let asset_cache = Arc::new(AssetCache::new(
+            cache_dir.clone(),
+            asset_cache_repo,
+            reqwest::Client::new(),
+        ));
         let mut registry = ProviderRegistry::default();
         for p in providers {
             registry.register(p);
@@ -257,7 +296,8 @@ pub mod test_support {
         Arc::new(AppState {
             sessions,
             provider_configs,
-            config: dummy_config(),
+            asset_cache,
+            config: dummy_config(&cache_dir.to_string_lossy()),
             providers: registry,
             provider_cache: ProviderCache::new(),
             ytdlp: None,

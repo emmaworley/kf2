@@ -18,5 +18,6 @@ target
 *.db-wal
 *.db-shm
 
-# Claude local settings
+# Claude locals
 .claude/settings.local.json
+.claude/scheduled_tasks.lock

@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__context7__query-docs",
+      "mcp__context7__resolve-library-id",
+      "Bash(cargo add:*)",
+      "Bash(cargo bench:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo clean:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo doc:*)",
+      "Bash(cargo fix:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(cargo info:*)",
+      "Bash(cargo metadata:*)",
+      "Bash(cargo remove:*)",
+      "Bash(cargo run:*)",
+      "Bash(cargo search:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo tree:*)",
+      "Bash(cargo update:*)",
+      "Bash(cargo verify-project:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $CLAUDE_PROJECT_DIR/.claude/hooks/postedit-fmt-hook.sh",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -9,7 +9,7 @@ import type {
 import {
   DeleteSessionRequestSchema,
   GetSessionRequestSchema,
-  SessionService,
+  SessionManagerService,
 } from "@kf2/proto/gen/session_pb.js";
 import type { MessageInitShape } from "@bufbuild/protobuf";
 
@@ -20,7 +20,7 @@ export const sessionApi = createApi({
   endpoints: (build) => ({
     listSessions: build.query<ListSessionsResponse, void>({
       query: () => ({
-        service: SessionService,
+        service: SessionManagerService,
         method: "listSessions",
         input: {},
       }),
@@ -32,7 +32,7 @@ export const sessionApi = createApi({
       MessageInitShape<typeof GetSessionRequestSchema>
     >({
       query: (input) => ({
-        service: SessionService,
+        service: SessionManagerService,
         method: "getSession",
         input,
       }),
@@ -41,7 +41,7 @@ export const sessionApi = createApi({
 
     createSession: build.mutation<CreateSessionResponse, void>({
       query: () => ({
-        service: SessionService,
+        service: SessionManagerService,
         method: "createSession",
         input: {},
       }),
@@ -53,7 +53,7 @@ export const sessionApi = createApi({
       MessageInitShape<typeof DeleteSessionRequestSchema>
     >({
       query: (input) => ({
-        service: SessionService,
+        service: SessionManagerService,
         method: "deleteSession",
         input,
       }),

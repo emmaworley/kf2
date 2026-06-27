@@ -18,13 +18,15 @@ use crate::tools::{FFmpeg, YtDlp};
 use anyhow::{Context, Result};
 use axum::Router;
 use axum::body::Body;
-use axum::http::{Response, StatusCode};
+use axum::http::{Request, Response, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::IntoResponse;
 use kf2_proto::kf2::provider_service_server::ProviderServiceServer;
 use kf2_proto::kf2::session_manager_service_server::SessionManagerServiceServer;
 use kf2_proto::kf2::session_service_server::SessionServiceServer;
 use serde::Deserialize;
 use tokio::net::TcpListener;
+use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 //
 // App-level config structs
@@ -146,7 +148,18 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let grpc_router = grpc_routes(state.clone());
     let frontend_router = frontend_routes(&state.config);
 
-    Router::new().merge(grpc_router).merge(frontend_router)
+    let cors = CorsLayer::permissive();
+
+    Router::new()
+        .merge(grpc_router)
+        .merge(frontend_router)
+        .layer(cors)
+        .layer(middleware::from_fn(print_request))
+}
+
+async fn print_request(req: Request<Body>, next: Next) -> impl IntoResponse {
+    eprintln!("→ {} {}", req.method(), req.uri());
+    next.run(req).await
 }
 
 fn grpc_routes(state: Arc<AppState>) -> Router {
@@ -168,8 +181,8 @@ fn grpc_routes(state: Arc<AppState>) -> Router {
 
 pub fn frontend_routes(config: &AppConfig) -> Router {
     Router::new()
-        .nest("/projector", spa_router(&config.projector))
-        .nest("/remocon", spa_router(&config.remocon))
+        .nest("/remocon/", spa_router(&config.remocon))
+        .nest("/projector/", spa_router(&config.projector))
 }
 
 fn spa_router(frontend: &FrontendConfig) -> Router {

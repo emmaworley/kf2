@@ -21,6 +21,21 @@ export interface GrpcQueryError {
   message: string;
 }
 
+export function getGrpcErrorMessage(
+  error: unknown,
+  fallback = "Request failed",
+): string {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+  return fallback;
+}
+
 /**
  * Creates an RTK Query baseQuery that dispatches RPCs via Connect-ES.
  *

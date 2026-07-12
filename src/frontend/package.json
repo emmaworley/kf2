@@ -1,0 +1,26 @@
+{
+  "name": "kf2-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "buf generate ../../proto",
+    "dev:remocon": "pnpm --filter @kf2/remocon dev",
+    "dev:projector": "pnpm --filter @kf2/projector dev",
+    "build": "pnpm run generate && pnpm --filter @kf2/projector build && pnpm --filter @kf2/remocon build",
+    "build:remocon": "pnpm --filter @kf2/remocon build",
+    "build:projector": "pnpm --filter @kf2/projector build",
+    "typecheck": "pnpm -r run typecheck"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "^1.50.0",
+    "@bufbuild/protoc-gen-es": "^2.3.0",
+    "prettier": "^3.5.0",
+    "typescript": "^5.8.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@bufbuild/buf",
+      "esbuild"
+    ]
+  }
+}

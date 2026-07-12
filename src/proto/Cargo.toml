@@ -11,3 +11,7 @@ prost = "0.14"
 [build-dependencies]
 tonic-prost-build = "0.14"
 protox = "0.9"
+
+[dev-dependencies]
+protox = "0.9"
+glob = "0.3"

@@ -1,0 +1,27 @@
+syntax = "proto3";
+package kf2;
+
+import "common.proto";
+
+enum CapabilityType {
+  CAPABILITY_SEARCH = 0;
+  CAPABILITY_LYRICS = 1;
+  CAPABILITY_SCORING = 2;
+}
+
+service ProviderService {
+  rpc ListProviders(ListProvidersRequest) returns (ListProvidersResponse);
+}
+
+// --- Provider info ---
+
+message ProviderInfo {
+  ProviderType provider = 1;
+  string name = 2;
+  repeated CapabilityType capabilities = 3;
+}
+
+message ListProvidersRequest {}
+message ListProvidersResponse {
+  repeated ProviderInfo providers = 1;
+}
